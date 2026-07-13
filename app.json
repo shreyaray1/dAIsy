@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "StyleAI",
+    "name": "dAIsy Style",
     "slug": "StyleAI",
     "scheme": "styleai",
     "version": "1.0.0",
@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#8C9F81"
     },
     "ios": {
       "supportsTablet": true,
@@ -54,6 +54,7 @@
       "eas": {
         "projectId": "922f6091-efee-4f31-8e62-eb52b0454227"
       }
-    }
+    },
+    "privacyPolicyUrl": "https://boulder-chemistry-ca9.notion.site/dAIsy-Privacy-Policy-39057b3ee25d80818704d4ab44a0b696"
   }
 }

@@ -27,7 +27,9 @@ const SCREENS = {
   SIGNIN: 'signin', QUIZ: 'quiz',
   SWIPE_TRAIN: 'swipe_train', STYLE_SUMMARY: 'style_summary', DASHBOARD: 'dashboard',
   SHOPPING: 'shopping', CLOSET: 'closet', PROFILE: 'profile',
-  FAVORITES: 'favorites', DISCOVER: 'discover', DELETE_ACCOUNT: 'delete_account',
+  FAVORITES: 'favorites', DISCOVER: 'discover',
+  DELETE_ACCOUNT: 'delete_account',
+  GUEST_HOME: 'guest_home',
 };
 const QUIZ_STEPS = 6;
  
@@ -302,7 +304,7 @@ function SearchIcon({ size = 18, color = C.dark }) {
   );
 }
  
-function TabBar({ active, onNav }) {
+function TabBar({ active, onNav, isGuest }) {
   const tabs = [
     { id:SCREENS.DASHBOARD, label:'Home'     },
     { id:SCREENS.SHOPPING,  label:'Shop'     },
@@ -313,16 +315,18 @@ function TabBar({ active, onNav }) {
     <View style={st.tabBar}>
       {tabs.map(tab => (
         <TouchableOpacity key={tab.id} onPress={() => onNav(tab.id)} style={st.tabItem}>
-          <Text style={[st.tabLabel, active === tab.id && st.tabLabelActive]}>{tab.label}</Text>
+          <Text style={[st.tabLabel, active === tab.id && st.tabLabelActive]}>
+            {tab.label}
+          </Text>
           {active === tab.id && <View style={st.tabActiveDot} />}
         </TouchableOpacity>
       ))}
     </View>
   );
 }
- 
+
 // ── SignIn ─────────────────────────────────────────────────────────────────────
-function SignInScreen({ onNext }) {
+function SignInScreen({ onNext, onGuest, onAppleName }) {
   const [loading, setLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
   const [error, setError] = useState('');
@@ -371,18 +375,17 @@ function SignInScreen({ onNext }) {
     setAppleLoading(true);
     setError('');
     try {
-      const credential = await AppleAuthentication.signInWithAppleAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
+    const credential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+    });
  
       // credential.identityToken is a JWT — send to Supabase
       const { data, error } = await supabase.auth.signInWithIdToken({
         provider: 'apple',
         token: credential.identityToken,
-        nonce: credential.authorizationCode, // Supabase accepts this
       });
  
       if (error) throw error;
@@ -392,10 +395,12 @@ function SignInScreen({ onNext }) {
         const displayName = [credential.fullName.givenName, credential.fullName.familyName]
           .filter(Boolean).join(' ');
         await supabase.auth.updateUser({ data: { full_name: displayName } });
+        if (onAppleName) onAppleName(displayName);
       }
     } catch (e) {
       if (e.code !== 'ERR_REQUEST_CANCELED') {
-        setError('Apple sign in failed. Please try again.');
+        console.log('Apple sign in error:', JSON.stringify(e));
+        setError('Apple sign in failed: ' + (e.message || JSON.stringify(e)));
       }
     }
     setAppleLoading(false);
@@ -436,6 +441,16 @@ function SignInScreen({ onNext }) {
         {error ? (
           <Text style={{ color: '#A05050', fontSize: 13, marginTop: 12, textAlign: 'center' }}>{error}</Text>
         ) : null}
+
+        <TouchableOpacity
+          onPress={onGuest}
+          style={{ marginTop: 16, alignItems: 'center', paddingVertical: 8 }}
+        >
+          <Text style={{ fontSize: 14, color: C.muted, textDecorationLine: 'underline' }}>
+            Continue as guest
+          </Text>
+        </TouchableOpacity>
+
         <Text style={st.legalText}>By continuing, you agree to our Terms & Privacy Policy.</Text>
       </View>
     </SafeAreaView>
@@ -444,10 +459,10 @@ function SignInScreen({ onNext }) {
  
  
 // ── Quiz ───────────────────────────────────────────────────────────────────────
-function QuizScreen({ onDone }) {
+function QuizScreen({ onDone, prefillName }) {
   const [step, setStep] = useState(0);
   const [data, setData] = useState({
-    name:'', age:'', occupation:[],
+    name: prefillName || '', age:'', occupation:[],
     brands:[], styles:[],
     skinTone:'', undertone:'', hairColor:'', eyeColor:'',
   });
@@ -1855,6 +1870,88 @@ const TRENDING_SEARCHES = [
   'Classic white shirts',
 ];
  
+function GuestDashboardScreen({ onSignIn }) {
+  const [weather, setWeather] = useState(null);
+
+  useEffect(() => {
+    fetchGuestWeather();
+  }, []);
+
+  const fetchGuestWeather = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setWeather({ temp:'--', desc:'', area:'Your Location' });
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const { latitude, longitude } = loc.coords;
+      const [place] = await Location.reverseGeocodeAsync({ latitude, longitude });
+      const area = [place?.city, place?.region].filter(Boolean).join(', ') || 'Your Location';
+      const res = await fetch(
+        `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${WEATHER_KEY}&units=imperial`
+      );
+      const data = await res.json();
+      const tempF  = Math.round(data.main.temp);
+      const desc   = data.weather[0]?.description || 'Clear';
+      const condId = data.weather[0]?.id || 800;
+      setWeather({ temp: tempF + '°F', desc, area, condId });
+    } catch (e) {
+      setWeather({ temp:'--', desc:'', area:'Your Location' });
+    }
+  };
+
+  return (
+    <View style={[st.flex, { backgroundColor: C.bg }]}>
+      <SafeAreaView>
+        <View style={st.dashHeader}>
+          <Text style={st.dashName}>dAIsy</Text>
+        </View>
+      </SafeAreaView>
+      <ScrollView contentContainerStyle={{ padding:24, paddingBottom:100 }}>
+
+        {/* Weather card */}
+        <View style={st.weatherCard}>
+          <Text style={{ color:'rgba(26,26,26,0.55)', fontSize:11, letterSpacing:1.5, textTransform:'uppercase' }}>
+            {weather ? weather.area : 'Getting location...'}
+          </Text>
+          <Text style={{ color:'#1A1A1A', fontSize:32, fontWeight:'300', marginTop:4 }}>
+            {weather ? weather.temp : '--'}
+          </Text>
+          <Text style={{ color:'rgba(26,26,26,0.55)', fontSize:13, textTransform:'capitalize', marginTop:2 }}>
+            {weather ? weather.desc : ''}
+          </Text>
+
+          <View style={{ height:1, backgroundColor:'rgba(26,26,26,0.12)', marginVertical:16 }} />
+
+          <Text style={{ color:'rgba(26,26,26,0.5)', fontSize:10, fontWeight:'600', letterSpacing:2, textTransform:'uppercase', marginBottom:8 }}>
+            Outfit of the day
+          </Text>
+          <Text style={{ color:'#1A1A1A', fontSize:14, lineHeight:20, marginBottom:14 }}>
+            Sign in to get a personalised outfit recommendation based on today's weather and your style.
+          </Text>
+          <TouchableOpacity onPress={onSignIn}
+            style={{ backgroundColor:C.dark, borderRadius:10, padding:12, alignItems:'center' }}>
+            <Text style={{ color:'#fff', fontSize:13, fontWeight:'500' }}>Sign in for today's outfit</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Sign in prompt card */}
+        <View style={[st.summaryCard, { marginTop:20 }]}>
+          <Text style={[st.sectionEyebrow, { marginBottom:12 }]}>Personalised for you</Text>
+          <Text style={{ fontSize:14, color:C.muted, lineHeight:22, marginBottom:16 }}>
+            Create a free account to get daily outfit recommendations, discover pieces matched to your taste, and build your digital wardrobe.
+          </Text>
+          <TouchableOpacity onPress={onSignIn} style={st.btnDark}>
+            <Text style={st.btnDarkText}>Get started — it's free</Text>
+          </TouchableOpacity>
+        </View>
+
+      </ScrollView>
+    </View>
+  );
+}
+
 function DashboardScreen({ onNav, userName, onSignOut, userAge, quizData }) {
   const [menuOpen, setMenuOpen]         = useState(false);
   const [weather, setWeather]           = useState(null);
@@ -2453,7 +2550,7 @@ Only valid JSON.`,
   return { query: parsed.query || userMessage, reply: parsed.reply || "On it! Let me find that for you." };
 }
  
-function ShoppingScreen({ userAge, quizData, initialSearch }) {
+function ShoppingScreen({ userAge, quizData, initialSearch, isGuest, onSignIn }) {
   const ageBucket  = getAgeBucket(userAge || '25');
   const quizBrands = quizData?.brands || [];
  
@@ -2663,6 +2760,15 @@ function ShoppingScreen({ userAge, quizData, initialSearch }) {
     const pct = selected.Discount_Percentage;
     return (
       <View style={[st.flex, { backgroundColor: C.bg }]}>
+        {isGuest && (
+          <TouchableOpacity
+            onPress={onSignIn}
+            style={{ backgroundColor: C.softGreen, paddingVertical: 10, paddingHorizontal: 24,
+              flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ fontSize: 13, color: C.accent }}>Sign in to save items and get personalized picks</Text>
+            <Text style={{ fontSize: 13, color: C.accent, fontWeight: '700' }}>Sign in →</Text>
+          </TouchableOpacity>
+        )}
         <SafeAreaView>
           <View style={{ flexDirection:'row', alignItems:'center', paddingHorizontal:24, paddingVertical:12 }}>
             <TouchableOpacity onPress={() => setSelected(null)} style={{ flexDirection:'row', alignItems:'center', gap:6 }}>
@@ -3306,18 +3412,26 @@ function DeleteAccountScreen({ userId, onDeleted, onBack }) {
       setConfirmed(true);
       return;
     }
- 
+
     setLoading(true);
     try {
-      // Delete all user data from each table
-      await supabase.from('closet_items').delete().eq('user_id', userId);
-      await supabase.from('discover_profile').delete().eq('user_id', userId);
-      await supabase.from('profiles').delete().eq('id', userId);
- 
-      // Sign out (Supabase doesn't allow client-side user deletion for security —
-      // the account auth record needs to be deleted server-side via Edge Function
-      // or Supabase dashboard. For App Store compliance, deleting all data + 
-      // signing out satisfies Apple's requirement in most cases.)
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const res = await fetch(
+        'https://huhboeikbbnqetcvsbta.supabase.co/functions/v1/delete-user',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({ user_id: userId }),
+        }
+      );
+
+      const result = await res.json();
+      if (result.error) throw new Error(result.error);
+
       await supabase.auth.signOut();
       onDeleted();
     } catch (e) {
@@ -3409,7 +3523,12 @@ function ProfileScreen({ onBack, onNav, quizData, swipeResults, userName, userAg
         )}
         <View style={[st.summaryCard, { backgroundColor:C.dark, borderColor:C.dark }]}>
           <Text style={[st.sectionEyebrow, { color:'rgba(255,255,255,0.5)' }]}>Style analysis</Text>
-          <Text style={{ fontSize:14, color:'rgba(255,255,255,0.88)', lineHeight:22, marginTop:12 }}>{styleAnalysis}</Text>
+          {Array.isArray(styleAnalysis) ? styleAnalysis.map((bullet, i) => (
+          <View key={i} style={{ flexDirection:'row', gap:10, marginBottom: i < styleAnalysis.length - 1 ? 12 : 0 }}>
+            <Text style={{ color:C.accent, fontSize:14, marginTop:1 }}>·</Text>
+            <Text style={{ flex:1, fontSize:14, color:'rgba(255,255,255,0.88)', lineHeight:21 }}>{bullet}</Text>
+          </View>
+        )) : <Text style={{ fontSize:14, color:'rgba(255,255,255,0.88)', lineHeight:22 }}>{styleAnalysis}</Text>}
         </View>
         <TouchableOpacity
           onPress={() => onNav(SCREENS.DELETE_ACCOUNT)}
@@ -3422,6 +3541,28 @@ function ProfileScreen({ onBack, onNav, quizData, swipeResults, userName, userAg
   );
 }
  
+function SignInRequiredScreen({ onSignIn, onBack }) {
+  return (
+    <SafeAreaView style={[st.flex, { backgroundColor: C.bg }]}>
+      <View style={{ flexDirection:'row', alignItems:'center', paddingHorizontal:24, paddingVertical:12, borderBottomWidth:1, borderBottomColor:C.hairline }}>
+        <TouchableOpacity onPress={onBack} style={{ marginRight:12 }}>
+          <Text style={{ fontSize:18, color:C.dark, fontWeight:'300' }}>←</Text>
+        </TouchableOpacity>
+        <Text style={st.dashName}>My Closet</Text>
+      </View>
+      <View style={st.centerFlex}>
+        <Text style={[st.heroTitle, { fontSize:24, marginBottom:8 }]}>Sign in to{'\n'}access your closet</Text>
+        <Text style={[st.heroSub, { marginBottom:32 }]}>
+          Create a free account to upload clothes,{'\n'}save favourites, and style your outfits.
+        </Text>
+        <TouchableOpacity onPress={onSignIn} style={st.btnDark}>
+          <Text style={st.btnDarkText}>Sign in or create account</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+
 // ── Root ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [screen, setScreen] = useState(SCREENS.SIGNIN);
@@ -3431,6 +3572,8 @@ export default function App() {
   const [swipeResults, setSwipeResults] = useState([]);
   const [authChecked, setAuthChecked] = useState(false);
   const [userId, setUserId] = useState(null);
+  const [isGuest, setIsGuest] = useState(false);
+  const [appleDisplayName, setAppleDisplayName] = useState('');
  
   useEffect(() => {
     let mounted = true;
@@ -3460,6 +3603,7 @@ export default function App() {
       const { data: profile, error } = await supabase.from('profiles').select('name, age, occupation, brands, styles, onboarding_complete').eq('id', session.user.id).single();
       if (!mounted) return;
       if (!error && profile?.onboarding_complete) {
+        setIsGuest(false);
         setUserName(profile.name || session.user.user_metadata?.full_name || '');
         setUserAge(profile.age || '');
         setQuizData({ occupation: profile.occupation || [], brands: profile.brands || [], styles: profile.styles || [] });
@@ -3519,18 +3663,42 @@ export default function App() {
   return (
     <View style={[st.root, { backgroundColor:C.bg }]}>
       <RNStatusBar barStyle="dark-content" backgroundColor={C.bg} />
-      {screen === SCREENS.SIGNIN         && <SignInScreen onNext={nextInFlow} />}
-      {screen === SCREENS.QUIZ           && <QuizScreen onDone={nextInFlow} />}
-      {screen === SCREENS.SWIPE_TRAIN    && <SwipeTrainScreen onDone={handleSwipeDone} userAge={userAge} />}
-      {screen === SCREENS.STYLE_SUMMARY  && (
+      {screen === SCREENS.SIGNIN && (
+        <SignInScreen
+          onNext={nextInFlow}
+          onGuest={() => { setIsGuest(true); setScreen(SCREENS.SHOPPING); }}
+          onAppleName={(name) => setAppleDisplayName(name)}
+        />
+      )}
+      {screen === SCREENS.QUIZ && (
+        <QuizScreen onDone={nextInFlow} prefillName={appleDisplayName} />
+      )}
+      {screen === SCREENS.SWIPE_TRAIN && <SwipeTrainScreen onDone={handleSwipeDone} userAge={userAge} />}
+      {screen === SCREENS.STYLE_SUMMARY && (
         <StyleSummaryScreen quizData={{ ...quizData, name: userName, age: userAge }} swipeResults={swipeResults} onDone={handleOnboardingComplete} />
       )}
-      {screen === SCREENS.DASHBOARD && (
+      {screen === SCREENS.DASHBOARD && !isGuest && (
         <DashboardScreen onNav={navTo} userName={userName} onSignOut={handleSignOut} userAge={userAge} quizData={quizData} />
+      )}
+      {screen === SCREENS.DASHBOARD && isGuest && (
+        <GuestDashboardScreen onSignIn={() => setScreen(SCREENS.SIGNIN)} />
+      )}
+      {screen === SCREENS.SHOPPING && (
+        <ShoppingScreen userAge={userAge} quizData={quizData} initialSearch={navParams[SCREENS.SHOPPING]?.initialSearch} isGuest={isGuest} onSignIn={() => setScreen(SCREENS.SIGNIN)} />
       )}
       {screen === SCREENS.DISCOVER && (
         <DiscoverScreen userAge={userAge} quizData={quizData} userId={userId} />
       )}
+      {screen === SCREENS.CLOSET && !isGuest && (
+        <ClosetScreen userId={userId} onNav={navTo} userAge={userAge} quizData={quizData} />
+      )}
+      {screen === SCREENS.CLOSET && isGuest && (
+        <SignInRequiredScreen
+          onSignIn={() => setScreen(SCREENS.SIGNIN)}
+          onBack={() => setScreen(SCREENS.SHOPPING)}
+        />
+      )}
+      {screen === SCREENS.FAVORITES && <FavoritesScreen userId={userId} onBack={() => setScreen(SCREENS.CLOSET)} />}
       {screen === SCREENS.PROFILE && (
         <ProfileScreen
           onBack={() => setScreen(SCREENS.DASHBOARD)}
@@ -3548,10 +3716,7 @@ export default function App() {
           onBack={() => setScreen(SCREENS.PROFILE)}
         />
       )}
-      {screen === SCREENS.SHOPPING       && <ShoppingScreen userAge={userAge} quizData={quizData} initialSearch={navParams[SCREENS.SHOPPING]?.initialSearch} />}
-      {screen === SCREENS.CLOSET         && <ClosetScreen userId={userId} onNav={navTo} userAge={userAge} quizData={quizData} />}
-      {screen === SCREENS.FAVORITES      && <FavoritesScreen userId={userId} onBack={() => setScreen(SCREENS.CLOSET)} />}
-      {isMainTab && <TabBar active={screen} onNav={navTo} />}
+      {isMainTab && <TabBar active={screen} onNav={navTo} isGuest={isGuest} />}
     </View>
   );
 }
