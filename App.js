@@ -460,16 +460,35 @@ function SignInScreen({ onNext, onGuest, onAppleName }) {
  
 // ── Quiz ───────────────────────────────────────────────────────────────────────
 function QuizScreen({ onDone, prefillName }) {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(prefillName ? 1 : 0);
   const [data, setData] = useState({
     name: prefillName || '', age:'', occupation:[],
     brands:[], styles:[],
     skinTone:'', undertone:'', hairColor:'', eyeColor:'',
   });
+
+  useEffect(() => {
+    if (prefillName && step === 0) {
+      setStep(1);
+      setData(prev => ({ ...prev, name: prefillName }));
+    }
+  }, [prefillName]);
  
-  const next = () => { if (step < QUIZ_STEPS - 1) setStep(prev => prev + 1); else onDone(data.name, data.age, data); };
+  const next = () => {
+    if (step < QUIZ_STEPS - 1) {
+      setStep(prev => prev + 1);
+    } else {
+      // Use prefillName as fallback if name field was skipped
+      onDone(data.name || prefillName, data.age, {
+        ...data,
+        name: data.name || prefillName,
+      });
+    }
+  };
   const back = () => setStep(prev => prev - 1);
-  const progress = ((step + 1) / QUIZ_STEPS) * 100;
+  const totalSteps = prefillName ? QUIZ_STEPS - 1 : QUIZ_STEPS;
+  const displayStep = prefillName ? step : step + 1;
+  const progress = (displayStep / totalSteps) * 100;
   const toggle = (field, val) =>
     setData(prev => ({ ...prev, [field]: prev[field].includes(val) ? prev[field].filter(x => x !== val) : [...prev[field], val] }));
   const canContinue = step === 2 ? data.brands.length >= 3 : true;
@@ -481,7 +500,7 @@ function QuizScreen({ onDone, prefillName }) {
           {step > 0
             ? <TouchableOpacity onPress={back}><Text style={{ fontSize:18, color:C.dark, fontWeight:'300' }}>←</Text></TouchableOpacity>
             : <View />}
-          <Text style={{ fontSize:12, color:C.muted, letterSpacing:1.5, textTransform:'uppercase' }}>{step + 1} / {QUIZ_STEPS}</Text>
+        <Text style={{ fontSize:12, color:C.muted, letterSpacing:1.5, textTransform:'uppercase' }}>{displayStep} / {totalSteps}</Text>
         </View>
         <View style={st.progressTrack}>
           <View style={[st.progressFill, { width:`${progress}%` }]} />
